@@ -10,7 +10,7 @@ from telegram.ext import (
 from bot.config import settings
 from bot.constants import CallbackData
 from bot.db import DBHelper
-from bot.handlers import common, onboarding, payments, admin
+from bot.handlers import common, onboarding, payments, admin, support
 
 logger = logging.getLogger(__name__)
 
@@ -20,8 +20,10 @@ def setup_handlers(app):
     
     # Admin commands
     admin_handlers = [
+        CommandHandler("price", admin.price_command),
         CommandHandler("stats", admin.stats_command),
         CommandHandler("list", admin.list_users_command),
+        CommandHandler("reply", support.admin_reply)
     ]
     for handler in admin_handlers:
         app.add_handler(handler)
@@ -45,6 +47,7 @@ def setup_handlers(app):
             filters.Regex("^(📞 Поддержка|👥 Реферальная ссылка|📊 Статистика)$"),
             common.menu_handler
         ),
+        MessageHandler(filters.TEXT & ~filters.COMMAND, support.support_message)
     ]
     for handler in menu_handlers:
         app.add_handler(handler, group=1)

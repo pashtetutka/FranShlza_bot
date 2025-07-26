@@ -6,6 +6,10 @@ from telegram.constants import ParseMode
 from bot.decorators import admin_only
 from bot.config import settings
 from bot.utils import fmt_table, send_long
+from telegram import InlineKeyboardButton, InlineKeyboardMarkup
+from bot.constants import Role, CallbackData
+
+
 
 logger = logging.getLogger(__name__)
 
@@ -52,3 +56,31 @@ async def list_users_command(update: Update, context: ContextTypes.DEFAULT_TYPE)
 
     headers = ["TG_ID", "USER", "INST", "ROLE", "PAID", "PRICE", "PARENT", "REFS", "JOINED"]
     await send_long(context.bot, settings.ADMIN_ID, fmt_table(data, headers))
+
+@admin_only(settings.ADMIN_ID)
+async def price_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    if len(context.args) != 2:
+        await update.message.reply_text("Использование: /price <uid> <сумма>")
+        return
+
+    try:
+        uid, amount = int(context.args[0]), int(context.args[1])
+    except ValueError:
+        await update.message.reply_text("Оба аргумента должны быть числами.")
+        return
+
+    db = context.bot_data["db"]
+    db.set_user_field(uid, "price_offer", amount)
+    db.update_user_role(uid, Role.OLD)
+
+    kb = InlineKeyboardMarkup(
+        [[InlineKeyboardButton(f"Я оплатил {amount}₽", callback_data=CallbackData.NOTIFY_PAYMENT)]]
+    )
+
+    try:
+        await context.bot.send_message(uid, f"Ваша цена: {amount}₽.\nЖдём оплату", reply_markup=kb)
+    except Exception as e:
+        await update.message.reply_text(f"Не смог отправить сообщение пользователю: {e}")
+        return
+
+    await update.message.reply_text(f"Цена {amount}₽ назначена пользователю {uid}.")
