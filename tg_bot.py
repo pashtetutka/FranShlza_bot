@@ -1,17 +1,15 @@
 from __future__ import annotations
-import os
-import sqlite3
+
 import logging
 import asyncio
-from telegram.constants import ParseMode
-from datetime import datetime
 from typing import Optional, List
+
 from telegram import (
     Update,
-    InputMediaPhoto,
+    InputMediaPhoto,  # Added missing import
     InlineKeyboardMarkup,
     InlineKeyboardButton,
-    ReplyKeyboardMarkup
+    ReplyKeyboardMarkup,
 )
 from telegram.ext import (
     ApplicationBuilder,
@@ -19,134 +17,59 @@ from telegram.ext import (
     MessageHandler,
     ContextTypes,
     filters,
-    ConversationHandler,
-    CallbackQueryHandler
+    CallbackQueryHandler,
 )
-from dotenv import load_dotenv
-from config import BOT_TOKEN, ADMIN_ID, CARD_NUMBER, PRICE_RUB, SMALL_PRICE_RUB, DB_PATH
+from telegram.constants import ParseMode
 
-# ─── MEDIA FILE IDS (Telegram) ─────────────────────
-IMAGE_FILE_IDS = [
-    "AgACAgIAAxkDAANhaHL6D6ottuienNw3_MHYheuHs1gAAu8EMhsC0phLe3Xuf69LDzcBAAMCAAN3AAM2BA",
-    "AgACAgIAAxkDAANiaHL6DwnIm9XCAAG2sfPEWPZlR0dNAALwBDIbAtKYS4KD2bYx6_7ZAQADAgADdwADNgQ",
-    "AgACAgIAAxkDAANjaHL6ED8t9XdCcZx4soJLgomntnsAAvEEMhsC0phLi4NqOQ5LOa8BAAMCAAN3AAM2BA",
-    "AgACAgIAAxkDAANkaHL6EX4jVXdCrrqSMEfdisCFb9AAAvIEMhsC0phLOuMcY0CfGUABAAMCAAN3AAM2BA",
-    "AgACAgIAAxkDAANlaHL6EaaiBBKuNTneGnxoHGeowdMAAvMEMhsC0phLO5-sUli9yAABAQADAgADdwADNgQ",
-    "AgACAgIAAxkDAANmaHL6EgpBeNKLnu7gAAGr86_R6SJpAAL0BDIbAtKYS8gs1elZLtgbAQADAgADdwADNgQ",
-    "AgACAgIAAxkDAANnaHL6E2TQXz-C0Cy6JDrsCmPpYYcAAvUEMhsC0phLI2oq0bT_vAwBAAMCAAN3AAM2BA",
-    "AgACAgIAAxkDAANoaHL6FLc-HKp24UX76Kf-BMX25P0AAvYEMhsC0phLe5K4v70ahjwBAAMCAAN3AAM2BA",
-]
-VIDEO_FILE_ID = "BAACAgIAAxkBAAIRwmh7eaB8DOZX1be68Hkhqeikt_JWAALYeAACKF3gSwjj1H5O3kk5NgQ"
-YELLOW_FILE_ID = "AgACAgIAAxkDAAIC4mh6Ddsy9-s3rxNnkweC4LPkNwMsAAJW7zEb5E7QS7m4drmHEFyZAQADAgADdwADNgQ"
+from config import Settings
+from database import Database
+from decorators import admin_only
+from constants import *
+from keyboards import *
+from utils import send_long, fmt_table
 
-# ─── LOGGING ───────────────────────────────────────
-logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
+# Setup
+settings = Settings()
+db = Database(settings.DB_PATH)
 logger = logging.getLogger(__name__)
 
-# ─── DATABASE SETUP ─────────────────────────────────
-def init_db() -> None:
-    """Ensure required tables exist."""
-    with sqlite3.connect(DB_PATH) as con:
-        cur = con.cursor()
-        cur.executescript(
-            """
-            CREATE TABLE IF NOT EXISTS users(
-                tg_id       INTEGER PRIMARY KEY,
-                ref_code    TEXT,
-                referrer_id INTEGER,
-                wallet      TEXT,
-                role        TEXT,
-                inst_nick   TEXT,
-                price_offer INTEGER,
-                paid        INTEGER DEFAULT 0,
-                subs_ok     INTEGER DEFAULT 0,
-                joined_at   TEXT
-            );
-            CREATE TABLE IF NOT EXISTS payments(
-                id      INTEGER PRIMARY KEY AUTOINCREMENT,
-                tg_id   INTEGER,
-                amount  INTEGER, 
-                paid_at TEXT
-            );
-            """
-        )
-        try:
-            cur.execute("ALTER TABLE users ADD COLUMN referrer_id INTEGER")
-        except sqlite3.OperationalError:
-            pass
-        con.commit()
+# Configure logging
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s %(levelname)s %(message)s"
+)
 
 # ─── DB HELPERS ────────────────────────────────────
 def upsert_user(tg_id: int, ref_code: Optional[str]) -> None:
-    with sqlite3.connect(DB_PATH) as con:
-        con.execute(
-            "INSERT OR IGNORE INTO users(tg_id,ref_code,joined_at,referrer_id) VALUES(?,?,?,?)",
-            (tg_id, ref_code, datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S"),
-             int(ref_code) if ref_code and ref_code.isdigit() else None),
-        )
-        con.commit()
+    db.upsert_user(tg_id, ref_code)
 
 
 def set_user_field(tg_id: int, field: str, value) -> None:
-    with sqlite3.connect(DB_PATH) as con:
-        con.execute(f"UPDATE users SET {field}=? WHERE tg_id=?", (value, tg_id))
-        con.commit()
+    db.set_user_field(tg_id, field, value)
 
 
 def get_user(tg_id: int) -> Optional[tuple]:
-    with sqlite3.connect(DB_PATH) as con:
-        cur = con.cursor()
-        cur.execute(
-            "SELECT role,paid,subs_ok,price_offer,referrer_id,inst_nick FROM users WHERE tg_id=?",
-            (tg_id,),
-        )
-        return cur.fetchone()
+    return db.get_user(tg_id)
 
 
 def store_payment(tg_id: int, amount: int) -> None:
-    with sqlite3.connect(DB_PATH) as con:
-        con.execute(
-            "INSERT INTO payments(tg_id,amount,paid_at) VALUES(?,?,?)",
-            (tg_id, amount, datetime.utcnow().isoformat()),
-        )
-        con.commit()
+    db.store_payment(tg_id, amount)
 
 
 def fetch_users(limit: int = 20, offset: int = 0) -> List[tuple]:
-    with sqlite3.connect(DB_PATH) as con:
-        cur = con.cursor()
-        cur.execute(
-            """SELECT tg_id, role, paid, price_offer,
-                     referrer_id, inst_nick, joined_at
-               FROM users
-               ORDER BY joined_at DESC
-               LIMIT ? OFFSET ?""",
-            (limit, offset),
-        )
-        return cur.fetchall()
+    return db.fetch_users(limit, offset)
 
 
 def fetch_user_detail(tg_id: int) -> Optional[tuple]:
-    with sqlite3.connect(DB_PATH) as con:
-        cur = con.cursor()
-        cur.execute("SELECT * FROM users WHERE tg_id=?", (tg_id,))
-        return cur.fetchone()
+    return db.fetch_user_detail(tg_id)
 
 
 def fetch_referrals(tg_id: int) -> List[int]:
-    with sqlite3.connect(DB_PATH) as con:
-        cur = con.cursor()
-        cur.execute("SELECT tg_id FROM users WHERE referrer_id=?", (tg_id,))
-        return [r[0] for r in cur.fetchall()]
+    return db.fetch_referrals(tg_id)
 
 
 def global_stats() -> tuple[int, int, int]:
-    with sqlite3.connect(DB_PATH) as con:
-        cur = con.cursor()
-        cur.execute("SELECT COUNT(*) FROM users"); total_users = cur.fetchone()[0]
-        cur.execute("SELECT COUNT(*) FROM users WHERE paid=1"); paid_users = cur.fetchone()[0]
-        cur.execute("SELECT COALESCE(SUM(amount),0) FROM payments"); total_rub = cur.fetchone()[0]
-        return total_users, paid_users, total_rub
+    return db.global_stats()
 
 def referral_counts() -> dict[int, int]:
     """{uid: children_qty} для всех пользователей."""
@@ -271,9 +194,9 @@ async def choose_role(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
 
     if q.data == "role_new":
         set_user_field(uid, "role", "new")
-        set_user_field(uid, "price_offer", PRICE_RUB)        
+        set_user_field(uid, "price_offer", settings.PRICE_RUB)        
         await q.message.reply_text(
-            f"Переведите {PRICE_RUB}₽ на карту {CARD_NUMBER}", reply_markup=PAY_NOTIFY
+            f"Переведите {settings.PRICE_RUB}₽ на карту {settings.CARD_NUMBER}", reply_markup=PAY_NOTIFY
         )
     else:
         set_user_field(uid, "role", "old_pending")        
@@ -289,7 +212,7 @@ async def notify_payment(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
 
     kb = InlineKeyboardMarkup([[InlineKeyboardButton("Да, он оплатил", callback_data=f"confirm_{uid}")]])
     await context.bot.send_message(
-        ADMIN_ID, f"Пользователь {tg_user} нажал «Я оплатил»", reply_markup=kb
+        settings.ADMIN_ID, f"Пользователь {tg_user} нажал «Я оплатил»", reply_markup=kb
     )
     await q.message.reply_text("Администратор получит уведомление.")
 
@@ -308,14 +231,14 @@ async def handle_instagram_nick(update: Update, context: ContextTypes.DEFAULT_TY
     context.user_data["awaiting_inst_nick"] = False
 
     tg_user = f"@{update.effective_user.username}" if update.effective_user.username else update.effective_user.first_name
-    await context.bot.send_message(ADMIN_ID,f"Старичок Instagram: @{inst_nick}\nTelegram: {tg_user}\nuid: {uid}\n")
-    await context.bot.send_message(ADMIN_ID,f"/price {uid} 1000")
+    await context.bot.send_message(settings.ADMIN_ID, f"Старичок Instagram: @{inst_nick}\nTelegram: {tg_user}\nuid: {uid}\n")
+    await context.bot.send_message(settings.ADMIN_ID, f"/price {uid} 1000")
     await update.message.reply_text(
         "Ваш аккаунт на модерации. Ожидайте индивидуальную цену.📩"
     )
 
 async def price_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    if ADMIN_ID not in (update.effective_user.id, update.effective_chat.id):
+    if settings.ADMIN_ID not in (update.effective_user.id, update.effective_chat.id):
         return
     if len(context.args) != 2:
         await update.message.reply_text("Использование: /price <tg_id> <сумма>")
@@ -343,7 +266,7 @@ async def confirm_payment(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
         return
 
     set_user_field(uid, "paid", 1)
-    store_payment(uid, PRICE_RUB)
+    store_payment(uid, settings.PRICE_RUB)
 
     await q.message.reply_text(f"Оплата пользователя {uid} подтверждена.")
 
@@ -378,16 +301,15 @@ async def support_message(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
         return
     user    = update.effective_user
     tg_user = f"@{user.username}" if user.username else user.first_name
-    await context.bot.send_message(ADMIN_ID, f"[Support] from {tg_user} (id={user.id}):\n{update.message.text}")
-    await context.bot.send_message(ADMIN_ID,f"/reply {user.id} <ответ>")
+    await context.bot.send_message(settings.ADMIN_ID, f"[Support] from {tg_user} (id={user.id}):\n{update.message.text}")
+    await context.bot.send_message(settings.ADMIN_ID, f"/reply {user.id} <ответ>")
     await update.message.reply_text("Ваше сообщение отправлено администратору.\nОжидайте ответ(Не более 2 суток).")
     context.user_data["awaiting_support"] = False
 
 
 # ─── ADMIN COMMANDS ─────────────────────────────────
+@admin_only(settings.ADMIN_ID)
 async def admin_reply(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    if ADMIN_ID not in (update.effective_user.id, update.effective_chat.id):
-        return
     if len(context.args) < 2:
         await update.message.reply_text("Использование: /reply <tg_id> <текст>")
         return
@@ -401,10 +323,8 @@ async def admin_reply(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
     await context.bot.send_message(chat_id=target, text=f"💬 Ответ поддержки:\n{answer}")
     await update.message.reply_text(f"Ответ отправлен пользователю {target}.")
 
+@admin_only(settings.ADMIN_ID)
 async def stats_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    if ADMIN_ID not in (update.effective_user.id, update.effective_chat.id):
-        return
-
     total, paid, money = global_stats()
 
     refcnt   = referral_counts()
@@ -427,7 +347,7 @@ async def stats_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
 
 
 async def list_users_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    if ADMIN_ID not in (update.effective_user.id, update.effective_chat.id):
+    if settings.ADMIN_ID not in (update.effective_user.id, update.effective_chat.id):
         return
 
     # 1) достаём
@@ -464,13 +384,13 @@ async def list_users_command(update: Update, context: ContextTypes.DEFAULT_TYPE)
     text    = fmt_table(data, headers)
 
     # 5) шлём
-    await send_long(context.bot, ADMIN_ID, text)
+    await send_long(context.bot, settings.ADMIN_ID, text)
 
 
 
 
 async def user_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    if ADMIN_ID not in (update.effective_user.id, update.effective_chat.id):
+    if settings.ADMIN_ID not in (update.effective_user.id, update.effective_chat.id):
         return
     if len(context.args) != 1:
         return
@@ -517,9 +437,8 @@ async def user_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
 
 
 
-
 async def set_field_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    if ADMIN_ID not in (update.effective_user.id, update.effective_chat.id):
+    if settings.ADMIN_ID not in (update.effective_user.id, update.effective_chat.id):
         return
     try:
         tgt = int(context.args[0])
@@ -533,7 +452,7 @@ async def set_field_command(update: Update, context: ContextTypes.DEFAULT_TYPE) 
         await update.message.reply_text(f"Ошибка: {e}")
 
 async def add_payment_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    if ADMIN_ID not in (update.effective_user.id, update.effective_chat.id):
+    if settings.ADMIN_ID not in (update.effective_user.id, update.effective_chat.id):
         return
     try:
         tgt = int(context.args[0]); amt = int(context.args[1])
@@ -545,7 +464,7 @@ async def add_payment_command(update: Update, context: ContextTypes.DEFAULT_TYPE
 
 
 async def detect_video_id(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    if ADMIN_ID not in (update.effective_user.id, update.effective_chat.id):
+    if settings.ADMIN_ID not in (update.effective_user.id, update.effective_chat.id):
         return
 
     if update.message.video:
@@ -553,7 +472,7 @@ async def detect_video_id(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
         await update.message.reply_text(f"🎬 Video file_id: <code>{file_id}</code>", parse_mode="HTML")
 
 async def detect_message_id(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    if ADMIN_ID not in (update.effective_user.id, update.effective_chat.id):
+    if settings.ADMIN_ID not in (update.effective_user.id, update.effective_chat.id):
         return
 
     if update.message:
@@ -572,37 +491,53 @@ async def detect_message_id(update: Update, context: ContextTypes.DEFAULT_TYPE) 
 
 # ─────────────────── MAIN ────────────────────────────────────────────────────
 def main() -> None:
-    init_db()
-
-    app = ApplicationBuilder().token(BOT_TOKEN).build()
-
-    app.add_handler(CommandHandler("start",   start))
-    app.add_handler(CommandHandler("price",   price_command))
-    app.add_handler(CommandHandler("reply",   admin_reply))
-    app.add_handler(CommandHandler("stats",   stats_command))
-    app.add_handler(CommandHandler("list",   list_users_command))
-    app.add_handler(CommandHandler("user",         user_command))
-    app.add_handler(CommandHandler("set_field",    set_field_command))
-    app.add_handler(CommandHandler("add_payment",  add_payment_command))
-   
-    app.add_handler(CallbackQueryHandler(intro_done,    pattern="^intro_done$"))
-    app.add_handler(CallbackQueryHandler(choose_role,   pattern="^role_"))
-    app.add_handler(CallbackQueryHandler(notify_payment,pattern="^notify_payment$"))
-    app.add_handler(CallbackQueryHandler(confirm_payment,pattern="^confirm_\\d+$"))
-
-    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_instagram_nick), group=0)
-
-    app.add_handler(MessageHandler(filters.Regex("^ℹ️"), about_project), group=1)
-    app.add_handler(MessageHandler(filters.Regex("^👋"), want_join),    group=1)
-    app.add_handler(MessageHandler(filters.Regex("^(📞 Поддержка|👥 Реферальная ссылка|📊 Статистика)$"), handle_menu), group=1)
-    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, support_message), group=1)
-    #app.add_handler(MessageHandler(filters.VIDEO & ~filters.COMMAND, detect_video_id),group=1)
-    #app.add_handler(MessageHandler(filters.ALL & ~filters.COMMAND, detect_message_id),group=2)
+    """Initialize and start the bot."""
+    app = ApplicationBuilder().token(settings.BOT_TOKEN).build()
     
+    # User commands
+    app.add_handler(CommandHandler("start", start))
     
-    logger.info("Bot polling…")
+    # Admin commands
+    admin_handlers = [
+        CommandHandler(cmd, handler) for cmd, handler in [
+            ("price", price_command),
+            ("reply", admin_reply),
+            ("stats", stats_command),
+            ("list", list_users_command),
+            ("user", user_command),
+            ("set_field", set_field_command),
+            ("add_payment", add_payment_command),
+        ]
+    ]
+    for handler in admin_handlers:
+        app.add_handler(handler)
+    
+    # Callbacks
+    app.add_handler(CallbackQueryHandler(intro_done, pattern="^intro_done$"))
+    app.add_handler(CallbackQueryHandler(choose_role, pattern="^role_"))
+    app.add_handler(CallbackQueryHandler(notify_payment, pattern="^notify_payment$"))
+    app.add_handler(CallbackQueryHandler(confirm_payment, pattern="^confirm_\\d+$"))
+
+    # Message handlers
+    app.add_handler(MessageHandler(
+        filters.TEXT & ~filters.COMMAND,
+        handle_instagram_nick
+    ), group=0)
+
+    menu_handlers = [
+        MessageHandler(filters.Regex("^ℹ️"), about_project),
+        MessageHandler(filters.Regex("^👋"), want_join),
+        MessageHandler(
+            filters.Regex("^(📞 Поддержка|👥 Реферальная ссылка|📊 Статистика)$"),
+            handle_menu
+        ),
+        MessageHandler(filters.TEXT & ~filters.COMMAND, support_message),
+    ]
+    for handler in menu_handlers:
+        app.add_handler(handler, group=1)
+    
+    logger.info("Bot started and polling...")
     app.run_polling()
-
 
 if __name__ == "__main__":
     main()
