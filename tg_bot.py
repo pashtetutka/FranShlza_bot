@@ -23,6 +23,7 @@ from telegram.ext import (
     CallbackQueryHandler
 )
 from dotenv import load_dotenv
+from config import BOT_TOKEN, ADMIN_ID, CARD_NUMBER, PRICE_RUB, SMALL_PRICE_RUB, DB_PATH
 
 # ─── MEDIA FILE IDS (Telegram) ─────────────────────
 IMAGE_FILE_IDS = [
@@ -37,15 +38,6 @@ IMAGE_FILE_IDS = [
 ]
 VIDEO_FILE_ID = "BAACAgIAAxkBAAIRwmh7eaB8DOZX1be68Hkhqeikt_JWAALYeAACKF3gSwjj1H5O3kk5NgQ"
 YELLOW_FILE_ID = "AgACAgIAAxkDAAIC4mh6Ddsy9-s3rxNnkweC4LPkNwMsAAJW7zEb5E7QS7m4drmHEFyZAQADAgADdwADNgQ"
-
-# ─── CONFIGURATION ─────────────────────────────────
-load_dotenv()
-BOT_TOKEN = os.getenv("BOT_TOKEN")
-ADMIN_ID = int(os.getenv("ADMIN_ID", "0"))
-CARD_NUMBER = os.getenv("CARD_NUMBER", "0000 0000 0000 0000")
-PRICE_RUB = int(os.getenv("PRICE_RUB", "1000"))
-SMALL_PRICE_RUB = int(os.getenv("SMALL_PRICE_RUB", str(PRICE_RUB // 2)))
-DB_PATH = os.path.join(os.path.dirname(__file__), "bot.db")
 
 # ─── LOGGING ───────────────────────────────────────
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
