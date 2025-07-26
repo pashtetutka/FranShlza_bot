@@ -1,25 +1,19 @@
-import logging
-import asyncio
-from telegram import Update
+import logging, asyncio
+from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import ContextTypes
 from telegram.constants import ParseMode
 from bot.decorators import admin_only
 from bot.config import settings
 from bot.utils import fmt_table, send_long
-from telegram import InlineKeyboardButton, InlineKeyboardMarkup
 from bot.constants import Role, CallbackData
-
-
+from bot.domain.services import user_service, payment_service, referral_service
 
 logger = logging.getLogger(__name__)
 
 @admin_only(settings.ADMIN_ID)
 async def stats_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    db = context.bot_data["db"]
-    total, paid, money = db.global_stats()
-    refcnt = db.referral_counts()
-    
-    leaders = sorted(refcnt.items(), key=lambda x: x[1], reverse=True)[:5]
+    total, paid, money = payment_service.global_stats()
+    leaders = referral_service.top(5)
     ref_lines = [f"{i+1}. <code>{uid}</code> — {cnt}" for i, (uid, cnt) in enumerate(leaders)] or ["-"]
     percent = f"{paid/total*100:.1f}%" if total else "0%"
 
@@ -34,10 +28,9 @@ async def stats_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
 
 @admin_only(settings.ADMIN_ID)
 async def list_users_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    db = context.bot_data["db"]
     limit = int(context.args[0]) if context.args else 20
-    rows = db.fetch_users(limit)
-    refs = db.referral_counts()
+    rows = user_service.list(limit)
+    refs = user_service.referral_counts()
 
     chats = await asyncio.gather(*(context.bot.get_chat(r[0]) for r in rows))
     users = {c.id: c for c in chats}
@@ -62,16 +55,14 @@ async def price_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
     if len(context.args) != 2:
         await update.message.reply_text("Использование: /price <uid> <сумма>")
         return
-
     try:
         uid, amount = int(context.args[0]), int(context.args[1])
     except ValueError:
         await update.message.reply_text("Оба аргумента должны быть числами.")
         return
 
-    db = context.bot_data["db"]
-    db.set_user_field(uid, "price_offer", amount)
-    db.update_user_role(uid, Role.OLD)
+    user_service.set_field(uid, "price_offer", amount)
+    user_service.set_role(uid, Role.OLD)
 
     kb = InlineKeyboardMarkup(
         [[InlineKeyboardButton(f"Я оплатил {amount}₽", callback_data=CallbackData.NOTIFY_PAYMENT)]]

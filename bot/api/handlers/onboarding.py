@@ -4,6 +4,7 @@ from telegram.ext import ContextTypes
 from bot.constants import Role, CallbackData, BAD_PREFIXES, ABOUT_CHAT_ID, ABOUT_MESSAGE_ID
 from bot.keyboards import CHOICE_KB, PAY_NOTIFY, ROLE_KB
 from bot.config import settings
+from bot.domain.services import user_service
 
 logger = logging.getLogger(__name__)
 
@@ -28,35 +29,30 @@ async def want_join(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     )
 
 async def role_choice(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """Handle role selection callback."""
     q = update.callback_query
     await q.answer()
     uid = q.from_user.id
-    db = context.bot_data["db"]
 
     if q.data == CallbackData.ROLE_NEW:
-        db.update_user_role(uid, Role.NEW_PENDING)
+        user_service.set_role(uid, Role.NEW_PENDING)
         await q.message.reply_text(
             f"Переведите {settings.PRICE_RUB}₽ на карту {settings.CARD_NUMBER}",
             reply_markup=PAY_NOTIFY
         )
     elif q.data == CallbackData.ROLE_OLD:
-        db.update_user_role(uid, Role.OLD_PENDING)
+        user_service.set_role(uid, Role.OLD_PENDING)
         context.user_data["awaiting_inst_nick"] = True
         await q.message.reply_text("Введите ваш Instagram-ник:")
 
 async def handle_instagram_nick(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     if not context.user_data.get("awaiting_inst_nick"):
         return
-    
     if any(update.message.text.startswith(p) for p in BAD_PREFIXES):
         return
 
     uid = update.effective_user.id
     inst_nick = update.message.text.strip().lstrip("@")
-    db = context.bot_data["db"]
-    
-    db.set_user_field(uid, "inst_nick", inst_nick)
+    user_service.set_field(uid, "inst_nick", inst_nick)
     context.user_data["awaiting_inst_nick"] = False
 
     tg_user = f"@{update.effective_user.username}" if update.effective_user.username else update.effective_user.first_name

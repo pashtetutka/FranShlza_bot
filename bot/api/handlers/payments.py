@@ -1,10 +1,10 @@
 import logging
 from telegram import Update
 from telegram.ext import ContextTypes
-from ..constants import Role, CallbackData, YELLOW_FILE_ID, VIDEO_FILE_ID
-from ..keyboards import MENU_KB, get_payment_confirm_kb
-from ..config import settings
-from ..db.queries import DBHelper
+from bot.constants import Role, CallbackData, YELLOW_FILE_ID, VIDEO_FILE_ID
+from bot.keyboards import MENU_KB, get_payment_confirm_kb
+from bot.config import settings
+from bot.domain.services import user_service, payment_service
 
 logger = logging.getLogger(__name__)
 
@@ -25,28 +25,24 @@ async def notify_payment(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
 async def confirm_payment(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     q = update.callback_query
     await q.answer()
-    
     try:
         uid = int(q.data.split("_")[1])
     except (IndexError, ValueError):
         return
 
-    db: DBHelper = context.bot_data["db"]
-    user_role = db.get_user_role(uid)
-    
-    if user_role == Role.NEW_PENDING:
-        db.update_user_role(uid, Role.NEW)
-    elif user_role == Role.OLD_PENDING:
-        db.update_user_role(uid, Role.OLD)
-    
-    user_row = db.get_user(uid)
-    price_offer = user_row[6]  
+    role = user_service.get_role(uid)
+    if role == Role.NEW_PENDING:
+        user_service.set_role(uid, Role.NEW)
+    elif role == Role.OLD_PENDING:
+        user_service.set_role(uid, Role.OLD)
+
+    user_row = user_service.get(uid)
+    price_offer = user_row[6] if user_row else None
     amount = price_offer if price_offer is not None else settings.PRICE_RUB
-    
-    db.store_payment(uid, amount)
+
+    payment_service.store(uid, amount)
     await q.message.reply_text(f"Оплата пользователя {uid} подтверждена.")
 
-    # Отправляем инструкции
     await context.bot.send_photo(chat_id=uid, photo=YELLOW_FILE_ID)
     await context.bot.send_message(
         chat_id=uid,

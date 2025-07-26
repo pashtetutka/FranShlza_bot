@@ -1,0 +1,13 @@
+version: "3.9"
+
+services:
+  bot:
+    build: .
+    container_name: franshlza_bot
+    restart: unless-stopped
+    environment:
+      - BOT_TOKEN
+      - BOT_ADMIN_ID
+      - BOT_DB_PATH=data/bot.db
+    volumes:
+      - ./data:/app/data

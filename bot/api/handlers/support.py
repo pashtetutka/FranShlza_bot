@@ -3,13 +3,12 @@ from telegram import Update
 from telegram.ext import ContextTypes
 
 from bot.config import settings
-from bot.decorators import admin_only   # тот же декоратор, что и в других хендлерах
+from bot.decorators import admin_only
 
 logger = logging.getLogger(__name__)
-ADMIN_ID = settings.ADMIN_ID           # чтобы не тащить settings во все вызовы
+ADMIN_ID = settings.ADMIN_ID
 
 
-# ---------- сообщение пользователя в поддержку ----------
 async def support_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     if not context.user_data.get("awaiting_support"):
         return
@@ -30,7 +29,6 @@ async def support_message(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
     context.user_data["awaiting_support"] = False
 
 
-# ---------- ответ администратора пользователю ----------
 @admin_only(ADMIN_ID)
 async def admin_reply(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     if len(context.args) < 2:

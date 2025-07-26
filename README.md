@@ -59,7 +59,7 @@ python -m venv .venv
 source .venv/Scripts/activate      # macOS/Linux: source .venv/bin/activate
 
 # 2. Ставим зависимости
-pip install -r requirements.txt
+`pip install -r requirements.txt`
 
 # 3. Заполняем переменные окружения
 cp .env.sample .env

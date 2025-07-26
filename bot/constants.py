@@ -2,11 +2,11 @@ from typing import List
 from enum import Enum
 
 class Role(str, Enum):
-    UNREGISTERED = "unregistered"  # Начальное состояние
-    NEW_PENDING = "new_pending"    # Выбрал "Новичок", но еще не оплатил
-    NEW = "new"                    # Новичок после оплаты
-    OLD_PENDING = "old_pending"    # Выбрал "Старичок", ждет одобрения
-    OLD = "old"                    # Старичок после одобрения/оплаты
+    UNREGISTERED = "unregistered"
+    NEW_PENDING = "new_pending"
+    NEW = "new"
+    OLD_PENDING = "old_pending"
+    OLD = "old"
 
 class CallbackData(str, Enum):
     INTRO_DONE = "intro_done"
@@ -15,7 +15,6 @@ class CallbackData(str, Enum):
     NOTIFY_PAYMENT = "notify_payment"
     CONFIRM_PAYMENT = "confirm_{user_id}"
 
-# Telegram Media File IDs
 IMAGE_FILE_IDS: List[str] = [
     "AgACAgIAAxkDAANhaHL6D6ottuienNw3_MHYheuHs1gAAu8EMhsC0phLe3Xuf69LDzcBAAMCAAN3AAM2BA",
     "AgACAgIAAxkDAANiaHL6DwnIm9XCAAG2sfPEWPZlR0dNAALwBDIbAtKYS4KD2bYx6_7ZAQADAgADdwADNgQ",
@@ -30,9 +29,7 @@ IMAGE_FILE_IDS: List[str] = [
 VIDEO_FILE_ID: str = "BAACAgIAAxkBAAIRwmh7eaB8DOZX1be68Hkhqeikt_JWAALYeAACKF3gSwjj1H5O3kk5NgQ"
 YELLOW_FILE_ID: str = "AgACAgIAAxkDAAIC4mh6Ddsy9-s3rxNnkweC4LPkNwMsAAJW7zEb5E7QS7m4drmHEFyZAQADAgADdwADNgQ"
 
-# About section constants
 ABOUT_CHAT_ID: int = 918767042
 ABOUT_MESSAGE_ID: int = 4646
 
-# Menu command prefixes
 BAD_PREFIXES: tuple = ("ℹ️", "👋", "📞", "👥", "📊")
