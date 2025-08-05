@@ -9,7 +9,7 @@ class BotConfig(BaseSettings):
     DB_PATH: Path = Path(__file__).parent / "bot.db"
 
     class Config:
-        env_prefix = "BOT_"
+        #env_prefix = "BOT_"
         env_file = Path(__file__).parent / ".env"
         case_sensitive = True
         extra = "allow"

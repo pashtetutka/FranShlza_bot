@@ -6,7 +6,6 @@ from telegram.constants import ParseMode
 logger = logging.getLogger(__name__)
 
 async def send_long(bot: Bot, chat_id: int, text: str) -> None:
-    """Split long text into chunks and send with HTML parsing."""
     lines = text.split("\n")
     part = ""
     for line in lines:
@@ -18,7 +17,6 @@ async def send_long(bot: Bot, chat_id: int, text: str) -> None:
         await bot.send_message(chat_id, part, parse_mode=ParseMode.HTML)
 
 def fmt_table(rows: List[Tuple], headers: List[str]) -> str:
-    """Draw ASCII table with HTML pre-formatting."""
     cols = list(zip(headers, *rows))
     widths = [max(len(str(v)) for v in col) for col in cols]
     

@@ -1,8 +1,16 @@
+from pathlib import Path
+from dotenv import load_dotenv, find_dotenv
+load_dotenv( find_dotenv())
+
 import logging
 from telegram.ext import (
-    ApplicationBuilder, CommandHandler, MessageHandler,
-    CallbackQueryHandler, filters
+    ApplicationBuilder,
+    CommandHandler,
+    MessageHandler,
+    CallbackQueryHandler,
+    filters,
 )
+
 from bot.config import settings
 from bot.constants import CallbackData
 from bot.api.handlers import common, onboarding, payments, admin, support
@@ -22,40 +30,47 @@ def setup_handlers(app):
     for h in admin_handlers:
         app.add_handler(h)
 
-    app.add_handler(CallbackQueryHandler(onboarding.intro_done,
-                                         pattern=f"^{CallbackData.INTRO_DONE}$"))
-    app.add_handler(CallbackQueryHandler(onboarding.role_choice,
-                                         pattern="^role_"))
-    app.add_handler(CallbackQueryHandler(payments.notify_payment,
-                                         pattern=f"^{CallbackData.NOTIFY_PAYMENT}$"))
-    app.add_handler(CallbackQueryHandler(payments.confirm_payment,
-                                         pattern=r"^confirm_\d+$"))
+    app.add_handler(CallbackQueryHandler(onboarding.intro_done, pattern=f"^{CallbackData.INTRO_DONE}$"))
+ 
+    app.add_handler(CallbackQueryHandler(onboarding.role_choice, pattern=r"^role_(new|old)$",))
 
-    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND,
-                                   onboarding.handle_instagram_nick), group=0)
+    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, onboarding.handle_instagram_nick), group=0)
+
+    app.add_handler(CommandHandler(["buy", "pay"], payments.buy))
 
     menu_handlers = [
-        MessageHandler(filters.Regex("^ℹ️"), onboarding.about_project),
-        MessageHandler(filters.Regex("^👋 Хочу к вам$"), onboarding.want_join),
-        MessageHandler(filters.Regex("^(📞 Поддержка|👥 Реферальная ссылка|📊 Статистика)$"),
-                       common.menu_handler),
-        MessageHandler(filters.TEXT & ~filters.COMMAND, support.support_message)
-    ]
+            MessageHandler(filters.Regex("^ℹ️"), onboarding.about_project),
+            MessageHandler(filters.Regex("^👋 Хочу к вам$"), onboarding.want_join),
+            MessageHandler(filters.Regex("^(📞 Поддержка|👥 Реферальная ссылка|📊 Статистика)$"),
+                        common.menu_handler),
+            MessageHandler(filters.TEXT & ~filters.COMMAND, support.support_message)
+        ]
     for h in menu_handlers:
-        app.add_handler(h, group=1)
+            app.add_handler(h, group=1)
 
-def main():
-    logging.basicConfig(level=logging.INFO,
-                        format="%(asctime)s %(levelname)s %(message)s")
-    app = ApplicationBuilder().token(settings.TOKEN).build()
+def main() -> None:
+    logging.basicConfig(
+        level=logging.INFO,
+        format="%(asctime)s %(levelname)s %(message)s",
+    )
 
-    app.bot_data["user_service"] = user_service
-    app.bot_data["payment_service"] = payment_service
-    app.bot_data["referral_service"] = referral_service
+    application = ApplicationBuilder().token(settings.TOKEN).build()
 
-    setup_handlers(app)
+    application.bot_data.update(
+        user_service=user_service,
+        payment_service=payment_service,
+        referral_service=referral_service,
+    )
+
+    from os import getenv
+    if getenv("FRONTEND_URL"):
+        application.bot_data["FRONTEND_URL"] = getenv("FRONTEND_URL")
+
+    setup_handlers(application)
+
     logger.info("Bot started and polling…")
-    app.run_polling()
+    application.run_polling()
+
 
 if __name__ == "__main__":
     main()

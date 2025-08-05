@@ -1,12 +1,17 @@
 import logging, asyncio
-from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
+from telegram import (
+    Update,
+    KeyboardButton,
+    ReplyKeyboardMarkup,
+    WebAppInfo,
+)
 from telegram.ext import ContextTypes
 from telegram.constants import ParseMode
 from bot.decorators import admin_only
 from bot.config import settings
 from bot.utils import fmt_table, send_long
-from bot.constants import Role, CallbackData
 from bot.domain.services import user_service, payment_service, referral_service
+import os 
 
 logger = logging.getLogger(__name__)
 
@@ -51,27 +56,28 @@ async def list_users_command(update: Update, context: ContextTypes.DEFAULT_TYPE)
     await send_long(context.bot, settings.ADMIN_ID, fmt_table(data, headers))
 
 @admin_only(settings.ADMIN_ID)
-async def price_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    if len(context.args) != 2:
-        await update.message.reply_text("Использование: /price <uid> <сумма>")
-        return
+async def price_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     try:
         uid, amount = int(context.args[0]), int(context.args[1])
-    except ValueError:
-        await update.message.reply_text("Оба аргумента должны быть числами.")
+    except (IndexError, ValueError):
+        await update.message.reply_text("Использование: /price <uid> <amount>")
         return
 
     user_service.set_field(uid, "price_offer", amount)
-    user_service.set_role(uid, Role.OLD)
 
-    kb = InlineKeyboardMarkup(
-        [[InlineKeyboardButton(f"Я оплатил {amount}₽", callback_data=CallbackData.NOTIFY_PAYMENT)]]
-    )
-
-    try:
-        await context.bot.send_message(uid, f"Ваша цена: {amount}₽.\nЖдём оплату", reply_markup=kb)
-    except Exception as e:
-        await update.message.reply_text(f"Не смог отправить сообщение пользователю: {e}")
+    lava_link = os.getenv(f"LAVA_LINK_{amount}")
+    if not lava_link:
+        await update.message.reply_text(f"⚠️ LAVA_LINK_{amount} не найден в .env")
         return
 
-    await update.message.reply_text(f"Цена {amount}₽ назначена пользователю {uid}.")
+    btn = KeyboardButton(
+        text=f"💳 Оплатить {amount}₽",
+        web_app=WebAppInfo(url=lava_link),
+    )
+    markup = ReplyKeyboardMarkup([[btn]], resize_keyboard=True, one_time_keyboard=True)
+    await context.bot.send_message(
+        uid,
+        f"Стоимость подписки: {amount} ₽. Нажмите кнопку для оплаты:",
+        reply_markup=markup,
+    )
+    await update.message.reply_text("Ссылка отправлена пользователю ✅")
