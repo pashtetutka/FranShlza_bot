@@ -12,7 +12,9 @@ from telegram import (
     WebAppInfo,
 )
 from telegram.ext import ContextTypes
+from telegram import Update
 
+from bot.db.subscriptions import safe_set_role, upsert_user_basic
 from bot.constants import Role, CallbackData, ABOUT_CHAT_ID, ABOUT_MESSAGE_ID
 from bot.domain.services import user_service
 from bot.config import settings
@@ -46,13 +48,18 @@ async def want_join(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
 async def role_choice(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     q = update.callback_query
     await q.answer()
+    user = q.from_user
+    upsert_user_basic(user.id, user.username)
+
+    data = (q.data or "").lower()
+    role = "new" if "role_new" in data else "old"
+    safe_set_role(user.id, role)
 
     uid = q.from_user.id
     is_new = q.data.endswith("new")
 
     if is_new:
         user_service.set_role(uid, Role.NEW_PENDING)
-        await _send_payment_link(uid, context, is_new=True)
     else:
         user_service.set_role(uid, Role.OLD_PENDING)
         await q.message.reply_text(

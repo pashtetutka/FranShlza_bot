@@ -5,6 +5,7 @@ from telegram import (
     ReplyKeyboardMarkup,
     WebAppInfo,
 )
+from bot.api.handlers.trial import notify_old_price_ready
 from telegram.ext import ContextTypes
 from telegram.constants import ParseMode
 from bot.decorators import admin_only
@@ -81,3 +82,4 @@ async def price_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         reply_markup=markup,
     )
     await update.message.reply_text("Ссылка отправлена пользователю ✅")
+    await notify_old_price_ready(context.bot, uid, amount)
