@@ -71,15 +71,23 @@ async def price_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text(f"⚠️ LAVA_LINK_{amount} не найден в .env")
         return
 
-    btn = KeyboardButton(
+    """btn = KeyboardButton(
         text=f"💳 Оплатить {amount}₽",
         web_app=WebAppInfo(url=lava_link),
     )
-    markup = ReplyKeyboardMarkup([[btn]], resize_keyboard=True, one_time_keyboard=True)
-    await context.bot.send_message(
+    markup = ReplyKeyboardMarkup([[btn]], resize_keyboard=True, one_time_keyboard=True)"""
+    """await context.bot.send_message(
         uid,
         f"Стоимость подписки: {amount} ₽. Нажмите кнопку для оплаты:",
         reply_markup=markup,
-    )
+    )"""
     await update.message.reply_text("Ссылка отправлена пользователю ✅")
     await notify_old_price_ready(context.bot, uid, amount)
+
+
+
+
+"""await update.effective_message.reply_text(
+    "Клавиатура скрыта ✅",
+    reply_markup=ReplyKeyboardRemove(),
+    )"""

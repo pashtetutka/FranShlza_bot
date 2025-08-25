@@ -16,6 +16,8 @@ class CallbackData(str, Enum):
     CONFIRM_PAYMENT = "confirm_{user_id}"
     TRIAL_START = "trial_start"
     PAY_NOW = "pay_now"
+    WANT_JOIN = "want_join"   
+    ABOUT     = "about"       
 
 IMAGE_FILE_IDS: List[str] = [
     "AgACAgIAAxkDAANhaHL6D6ottuienNw3_MHYheuHs1gAAu8EMhsC0phLe3Xuf69LDzcBAAMCAAN3AAM2BA",

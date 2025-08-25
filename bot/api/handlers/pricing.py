@@ -54,7 +54,8 @@ async def show_after_role(update: Update, context: ContextTypes.DEFAULT_TYPE):
     safe_set_role(user.id, role)
 
     # 1) Сообщение с inline-оплатой
-    await _send_inline_pay(update, context, _price_for_role(role), role)
+    if role == "new":
+        await _send_inline_pay(update, context, _price_for_role(role), role)
 
     # 2) Через 200 мс — отдельное сообщение с ReplyKeyboard фритрайла (если не платный)
     if not is_paid(user.id):
@@ -66,7 +67,8 @@ async def show_after_role_text(update: Update, context: ContextTypes.DEFAULT_TYP
     upsert_user_basic(user.id, user.username)
     safe_set_role(user.id, role)
 
-    await _send_inline_pay(update, context, _price_for_role(role), role)
+    if role == "new":
+        await _send_inline_pay(update, context, _price_for_role(role), role)
     if not is_paid(user.id):
         context.job_queue.run_once(_trial_job, when=0.2, data={"chat_id": user.id})
 

@@ -17,7 +17,7 @@ from bot.db.subscriptions import (
 TRIAL_MSG_NEW     = getenv("TRIAL_MSG_NEW",  "🎁 Для новых пользователей доступен фритрайл на 2 месяца. Нажми кнопку ниже:")
 TRIAL_BTN_TEXT    = getenv("TRIAL_BTN_TEXT", "🎁 Хочу бесплатно")
 PAY_MSG_NEW       = getenv("PAY_MSG_NEW",    "💳 Либо сразу оформи подписку и начни получать рилсы без ограничений:")
-PAY_TEXT_DEFAULT  = getenv("PAY_BUTTON_TEXT","Оплатить 1000Р")
+PAY_TEXT_DEFAULT  = getenv("PAY_BUTTON_TEXT","💳 Оплатить 1000Р")
 PAY_MSG_OLD       = getenv("PAY_MSG_OLD",    "💳 Ваша индивидуальная цена готова. Оформите подписку:")
 
 def _trial_kb() -> InlineKeyboardMarkup:
@@ -71,12 +71,7 @@ async def offer_after_new_role(update: Update, context: ContextTypes.DEFAULT_TYP
 
 # === СТАРИЧОК: вызывать ПОСЛЕ утверждения цены админом ===
 async def notify_old_price_ready(bot, user_id: int, amount_rub: int, frontend_url: Optional[str] = None):
-    """
-    Шлёт:
-      1) inline фритрайл,
-      2) inline WebApp «Оплатить {amount}Р».
-    FRONTEND_URL берём из параметра → bot.application.bot_data → ENV.
-    """
+
     # 1) фритрайл
     await bot.send_message(
         chat_id=user_id,

@@ -7,7 +7,7 @@ from telegram import (
     Update,
     KeyboardButton,
     ReplyKeyboardMarkup,
-    InlineKeyboardMarkup,
+    ReplyKeyboardRemove,
     InlineKeyboardButton,
     WebAppInfo,
 )
@@ -33,6 +33,10 @@ async def intro_done(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
     )
 
 async def about_project(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    
+    q = update.callback_query
+    await q.answer()
+
     await context.bot.copy_message(
         chat_id=update.effective_chat.id,
         from_chat_id=ABOUT_CHAT_ID,
@@ -40,7 +44,11 @@ async def about_project(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
     )
 
 async def want_join(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    await update.message.reply_text(
+    
+    q = update.callback_query
+    await q.answer()
+
+    await update.callback_query.message.reply_text(
         "Вы уже ведёте мотивационный блог или только начинаете?",
         reply_markup=ROLE_KB,
     )
@@ -62,9 +70,7 @@ async def role_choice(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
         user_service.set_role(uid, Role.NEW_PENDING)
     else:
         user_service.set_role(uid, Role.OLD_PENDING)
-        await q.message.reply_text(
-            "Отлично! Пришлите, пожалуйста, ваш ник Instagram"
-        )
+        await q.message.reply_text("Отлично! Пришлите, пожалуйста, ваш ник Instagram")
 
 
 async def handle_instagram_nick(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -129,7 +135,7 @@ def _get_amount(uid: int, default_key: str) -> int:
 def _get_lava_link(amount: int) -> str | None:
     return os.getenv(f"LAVA_LINK_{amount}")
 
-
+"""
 def setup(application):
     from telegram.ext import (
         CallbackQueryHandler,
@@ -144,4 +150,4 @@ def setup(application):
     application.add_handler(
         MessageHandler(filters.TEXT & ~filters.COMMAND, handle_instagram_nick),
         group=0,
-    )
+    )"""

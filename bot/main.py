@@ -44,15 +44,14 @@ def setup_handlers(app):
 
     # === CALLBACK — ГРУППА 0 ===
     app.add_handler(CallbackQueryHandler(onboarding.intro_done, pattern=_exact(CallbackData.INTRO_DONE), block=True), group=0)
+    app.add_handler(CallbackQueryHandler(onboarding.want_join, pattern=_exact(CallbackData.WANT_JOIN), block=True), group=0)
+    app.add_handler(CallbackQueryHandler(onboarding.about_project, pattern=_exact(CallbackData.ABOUT), block=True), group=0)
 
-    # Новичок: сначала шлём (inline trial + inline WebApp оплата), затем твоя логика роли
     app.add_handler(CallbackQueryHandler(trial.offer_after_new_role, pattern=r"(?i)^role_new(?:.*)$", block=False), group=0)
     app.add_handler(CallbackQueryHandler(onboarding.role_choice, pattern=r"(?i)^role_(?:new|old)(?:.*)$", block=False), group=0)
 
-    # Нажатие inline фритрайла
     app.add_handler(CallbackQueryHandler(trial.start_free_trial_cb, pattern=_exact(CallbackData.TRIAL_START), block=True), group=0)
 
-    # Fallback оплаты (если нет FRONTEND_URL)
     app.add_handler(CallbackQueryHandler(trial.pay_now_fallback, pattern=_exact(CallbackData.PAY_NOW), block=True), group=0)
 
     # === ТЕКСТ — ГРУППА 1 ===
@@ -61,8 +60,6 @@ def setup_handlers(app):
     app.add_handler(MessageHandler(filters.Regex(insta_regex), onboarding.handle_instagram_nick, block=True), group=1)
 
     # Меню
-    app.add_handler(MessageHandler(filters.Regex(r"^(?:👋\s*)?Хочу к вам$"), onboarding.want_join, block=True), group=1)
-    app.add_handler(MessageHandler(filters.Regex(r"^(?:ℹ️\s*)?(?:Подробнее|О проекте|Информация)$"), onboarding.about_project, block=True), group=1)
     app.add_handler(MessageHandler(filters.Regex("^(📞 Поддержка|👥 Реферальная ссылка|📊 Статистика)$"), common.menu_handler, block=True), group=1)
 
     # Фоллбэк — любые остальные тексты

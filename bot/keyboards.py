@@ -5,10 +5,10 @@ INTRO_KB = InlineKeyboardMarkup([
     [InlineKeyboardButton("Ознакомился ✅", callback_data=CallbackData.INTRO_DONE)]
 ])
 
-CHOICE_KB = ReplyKeyboardMarkup(
-    [["👋 Хочу к вам", "ℹ️ Подробнее"]], 
-    resize_keyboard=True
-)
+CHOICE_KB = InlineKeyboardMarkup([[
+    InlineKeyboardButton("👋 Хочу к вам", callback_data=CallbackData.WANT_JOIN),
+    InlineKeyboardButton("ℹ️ Подробнее", callback_data=CallbackData.ABOUT),
+]])
 
 ROLE_KB = InlineKeyboardMarkup([[
     InlineKeyboardButton("Новичок", callback_data=CallbackData.ROLE_NEW),
