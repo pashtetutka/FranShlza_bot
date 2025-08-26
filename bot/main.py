@@ -1,4 +1,3 @@
-# bot/main.py
 from pathlib import Path
 from dotenv import load_dotenv, find_dotenv
 load_dotenv(find_dotenv())
@@ -6,6 +5,7 @@ load_dotenv(find_dotenv())
 import logging
 import os
 import re
+from bot.db.subscriptions import init_db
 from telegram.ext import (
     ApplicationBuilder,
     CommandHandler,
@@ -29,11 +29,8 @@ def _exact(cb) -> str:
     return rf"^{re.escape(_cbv(cb))}$"
 
 def setup_handlers(app):
-    # Команды
     app.add_handler(CommandHandler("start", common.start_handler))
-    app.add_handler(CommandHandler(["buy", "pay"], payments.buy))
 
-    # Админ
     for h in [
         CommandHandler("price", admin.price_command),
         CommandHandler("stats", admin.stats_command),
@@ -42,7 +39,6 @@ def setup_handlers(app):
     ]:
         app.add_handler(h)
 
-    # === CALLBACK — ГРУППА 0 ===
     app.add_handler(CallbackQueryHandler(onboarding.intro_done, pattern=_exact(CallbackData.INTRO_DONE), block=True), group=0)
     app.add_handler(CallbackQueryHandler(onboarding.want_join, pattern=_exact(CallbackData.WANT_JOIN), block=True), group=0)
     app.add_handler(CallbackQueryHandler(onboarding.about_project, pattern=_exact(CallbackData.ABOUT), block=True), group=0)
@@ -54,23 +50,19 @@ def setup_handlers(app):
 
     app.add_handler(CallbackQueryHandler(trial.pay_now_fallback, pattern=_exact(CallbackData.PAY_NOW), block=True), group=0)
 
-    # === ТЕКСТ — ГРУППА 1 ===
-    # Ник Instagram — первым
     insta_regex = r"^(?:@)?[A-Za-z0-9._]{2,30}$"
     app.add_handler(MessageHandler(filters.Regex(insta_regex), onboarding.handle_instagram_nick, block=True), group=1)
 
-    # Меню
     app.add_handler(MessageHandler(filters.Regex("^(📞 Поддержка|👥 Реферальная ссылка|📊 Статистика)$"), common.menu_handler, block=True), group=1)
 
-    # Фоллбэк — любые остальные тексты
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, support.support_message, block=True), group=3)
 
 def main() -> None:
+    init_db()
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s %(message)s")
 
     application = ApplicationBuilder().token(settings.TOKEN).build()
 
-    # сервисы + FRONTEND_URL для web_app
     application.bot_data.update(
         user_service=user_service,
         payment_service=payment_service,

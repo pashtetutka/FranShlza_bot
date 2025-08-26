@@ -1,11 +1,12 @@
-# bot/api/handlers/trial.py
 from os import getenv
 from typing import Optional
+from datetime import datetime, date
 from telegram import (
     Update,
     InlineKeyboardMarkup, InlineKeyboardButton,
     WebAppInfo,
 )
+from bot.domain.services.onboarding_service import send_instruction_package
 from telegram.ext import ContextTypes
 from bot.constants import CallbackData
 from bot.db.subscriptions import (
@@ -13,7 +14,6 @@ from bot.db.subscriptions import (
     start_free_trial, get_trial_info, get_role,
 )
 
-# Тексты (можно переопределить через .env)
 TRIAL_MSG_NEW     = getenv("TRIAL_MSG_NEW",  "🎁 Для новых пользователей доступен фритрайл на 2 месяца. Нажми кнопку ниже:")
 TRIAL_BTN_TEXT    = getenv("TRIAL_BTN_TEXT", "🎁 Хочу бесплатно")
 PAY_MSG_NEW       = getenv("PAY_MSG_NEW",    "💳 Либо сразу оформи подписку и начни получать рилсы без ограничений:")
@@ -33,11 +33,7 @@ def _build_frontend_url(frontend_url: str, role: str, amount: Optional[int]) -> 
     return f"{base}{qs}"
 
 def _pay_inline_kb(caption: str, role: str, amount: Optional[int], frontend_url: Optional[str]) -> InlineKeyboardMarkup:
-    """
-    Inline-кнопка оплаты:
-      - если FRONTEND_URL задан — открываем миниапп (web_app).
-      - иначе — fallback на callback PAY_NOW.
-    """
+
     if frontend_url:
         url = _build_frontend_url(frontend_url, role, amount)
         btn = InlineKeyboardButton(caption, web_app=WebAppInfo(url=url))
@@ -45,7 +41,6 @@ def _pay_inline_kb(caption: str, role: str, amount: Optional[int], frontend_url:
         btn = InlineKeyboardButton(caption, callback_data=CallbackData.PAY_NOW.value)
     return InlineKeyboardMarkup([[btn]])
 
-# === НОВИЧОК: два сообщения (trial inline + pay inline) ===
 async def offer_after_new_role(update: Update, context: ContextTypes.DEFAULT_TYPE):
     q = update.callback_query
     await q.answer()
@@ -58,10 +53,8 @@ async def offer_after_new_role(update: Update, context: ContextTypes.DEFAULT_TYP
     if is_paid(user.id):
         return
 
-    # 1) фритрайл
     await context.bot.send_message(chat_id=chat_id, text=TRIAL_MSG_NEW, reply_markup=_trial_kb())
 
-    # 2) оплата (inline WebApp)
     fe = context.application.bot_data.get("FRONTEND_URL")
     await context.bot.send_message(
         chat_id=chat_id,
@@ -69,17 +62,14 @@ async def offer_after_new_role(update: Update, context: ContextTypes.DEFAULT_TYP
         reply_markup=_pay_inline_kb(PAY_TEXT_DEFAULT, role="new", amount=None, frontend_url=fe),
     )
 
-# === СТАРИЧОК: вызывать ПОСЛЕ утверждения цены админом ===
 async def notify_old_price_ready(bot, user_id: int, amount_rub: int, frontend_url: Optional[str] = None):
 
-    # 1) фритрайл
     await bot.send_message(
         chat_id=user_id,
         text="🎁 Доступен фритрайл на 2 месяца. Нажмите кнопку ниже:",
         reply_markup=_trial_kb(),
     )
 
-    # URL-источник
     if not frontend_url:
         app = getattr(bot, "application", None)
         if app:
@@ -87,7 +77,6 @@ async def notify_old_price_ready(bot, user_id: int, amount_rub: int, frontend_ur
     if not frontend_url:
         frontend_url = getenv("FRONTEND_URL")
 
-    # 2) оплата
     caption = f"Оплатить {amount_rub}Р"
     kb = _pay_inline_kb(caption, role="old", amount=amount_rub, frontend_url=frontend_url)
     await bot.send_message(
@@ -96,8 +85,9 @@ async def notify_old_price_ready(bot, user_id: int, amount_rub: int, frontend_ur
         reply_markup=kb,
     )
 
-# === Обработка inline «🎁 Хочу бесплатно» ===
-async def start_free_trial_cb(update: Update, context: ContextTypes.DEFAULT_TYPE):
+from datetime import datetime
+
+async def start_free_trial_cb(update: Update, context: ContextTypes.DEFAULT_TYPE): 
     q = update.callback_query
     await q.answer()
     user = q.from_user
@@ -119,23 +109,28 @@ async def start_free_trial_cb(update: Update, context: ContextTypes.DEFAULT_TYPE
         )
         info = get_trial_info(user.id)
         if info and info.get("trial_expires_at"):
-            await q.message.reply_text(f"Дата окончания: {info['trial_expires_at']}")
+            dt = datetime.fromisoformat(info["trial_expires_at"].replace("Z", "+00:00"))
+            await q.message.reply_text(f"Дата окончания: {dt.strftime('%d.%m.%Y')}")
+            await send_instruction_package(context.bot, user.id)
+
     elif result == "PAID_ALREADY":
         await q.message.reply_text("У тебя уже активная оплаченная подписка ✅")
     elif result == "ACTIVE_ALREADY":
         info = get_trial_info(user.id)
-        extra = f"\nАктивен до: {info['trial_expires_at']}" if info and info.get("trial_expires_at") else ""
+        extra = ""
+        if info and info.get("trial_expires_at"):
+            dt = datetime.fromisoformat(info["trial_expires_at"].replace("Z", "+00:00"))
+            extra = f"\nАктивен до: {dt.strftime('%d.%m.%Y')}"
         await q.message.reply_text("Фритрайл уже активен ✅" + extra)
     elif result == "ALREADY_USED":
         await q.message.reply_text("Фритрайл уже был использован ранее. Продолжить можно по платной подписке.")
 
-# === Fallback, если нет FRONTEND_URL ===
+
 async def pay_now_fallback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     q = update.callback_query
     await q.answer()
     await q.message.reply_text("Для оплаты отправь команду /buy (или /pay).")
 
-# (не обязательно) запасной показ inline оплаты, если что-то не дошло
 async def maybe_offer_on_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = update.effective_user
     if is_paid(user.id):

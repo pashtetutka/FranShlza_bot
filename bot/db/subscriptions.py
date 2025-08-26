@@ -1,22 +1,210 @@
-# bot/db/subscriptions.py
-import sqlite3
+from __future__ import annotations
+
 from contextlib import closing
-from datetime import datetime, timedelta, timezone
 from typing import Optional, Literal
 
-DB_PATH = "bot.db"  # поправь, если у тебя другой путь
+import sqlite3
+from pathlib import Path
 
-def get_conn():
-    conn = sqlite3.connect(DB_PATH)
-    conn.execute("PRAGMA foreign_keys = ON")
+_REPO_ROOT = Path(__file__).resolve().parents[2]
+DB_PATH = _REPO_ROOT / "data" / "app.db"
+
+def get_conn() -> sqlite3.Connection:
+    DB_PATH.parent.mkdir(parents=True, exist_ok=True)
+    conn = sqlite3.connect(DB_PATH, check_same_thread=False)
+    conn.row_factory = sqlite3.Row
     return conn
+
+def _table_exists(conn: sqlite3.Connection, name: str) -> bool:
+    row = conn.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name=? LIMIT 1", (name,)).fetchone()
+    return row is not None
+
+def _columns(conn: sqlite3.Connection, table: str) -> set[str]:
+    return {r["name"] for r in conn.execute(f"PRAGMA table_info({table})").fetchall()}
+
+def _ensure_column(conn: sqlite3.Connection, table: str, column: str, ddl_sql: str) -> None:
+    if column not in _columns(conn, table):
+        conn.execute(ddl_sql)
+
+def _rebuild_table_user_id_to_tg_user_id(conn: sqlite3.Connection, table: str, create_sql: str, insert_sql: str) -> None:
+    """Общая миграция: переименовать user_id -> tg_user_id через перестройку таблицы."""
+    conn.execute("PRAGMA foreign_keys=OFF;")
+    try:
+        conn.execute("BEGIN;")
+        conn.execute(f"ALTER TABLE {table} RENAME TO {table}_old;")
+        conn.execute(create_sql)
+        conn.execute(insert_sql)
+        conn.execute(f"DROP TABLE {table}_old;")
+        conn.execute("COMMIT;")
+    except Exception:
+        conn.execute("ROLLBACK;")
+        raise
+    finally:
+        conn.execute("PRAGMA foreign_keys=ON;")
+
+def _ensure_users_schema(conn: sqlite3.Connection) -> None:
+    if not _table_exists(conn, "users"):
+        conn.execute("""
+            CREATE TABLE users (
+              tg_user_id  INTEGER PRIMARY KEY,
+              username    TEXT,
+              role        TEXT,
+              created_at  TEXT DEFAULT (datetime('now')),
+              updated_at  TEXT DEFAULT (datetime('now')),
+              last_seen   TEXT DEFAULT (datetime('now'))
+            );
+        """)
+    else:
+        cols = _columns(conn, "users")
+        if "tg_user_id" not in cols and "user_id" in cols:
+            _rebuild_table_user_id_to_tg_user_id(
+                conn,
+                "users",
+                create_sql="""
+                    CREATE TABLE users (
+                      tg_user_id  INTEGER PRIMARY KEY,
+                      username    TEXT,
+                      role        TEXT,
+                      created_at  TEXT DEFAULT (datetime('now')),
+                      updated_at  TEXT DEFAULT (datetime('now')),
+                      last_seen   TEXT DEFAULT (datetime('now'))
+                    );
+                """,
+                insert_sql="""
+                    INSERT INTO users (tg_user_id, username, role, created_at, updated_at, last_seen)
+                    SELECT user_id, username, role, created_at, updated_at, COALESCE(last_seen, datetime('now'))
+                    FROM users_old;
+                """,
+            )
+        _ensure_column(conn, "users", "last_seen",
+                       "ALTER TABLE users ADD COLUMN last_seen TEXT DEFAULT (datetime('now'));")
+
+def _ensure_free_trials_schema(conn: sqlite3.Connection) -> None:
+    if not _table_exists(conn, "free_trials"):
+        conn.execute("""
+            CREATE TABLE free_trials (
+              tg_user_id        INTEGER PRIMARY KEY,
+              started_at        TEXT NOT NULL DEFAULT (datetime('now')),
+              trial_expires_at  TEXT NOT NULL,
+              status            TEXT NOT NULL DEFAULT 'ACTIVE'
+            );
+        """)
+    else:
+        cols = _columns(conn, "free_trials")
+        if "tg_user_id" not in cols and "user_id" in cols:
+            _rebuild_table_user_id_to_tg_user_id(
+                conn,
+                "free_trials",
+                create_sql="""
+                    CREATE TABLE free_trials (
+                      tg_user_id        INTEGER PRIMARY KEY,
+                      started_at        TEXT NOT NULL DEFAULT (datetime('now')),
+                      trial_expires_at  TEXT NOT NULL,
+                      status            TEXT NOT NULL DEFAULT 'ACTIVE'
+                    );
+                """,
+                insert_sql="""
+                    INSERT INTO free_trials (tg_user_id, started_at, trial_expires_at, status)
+                    SELECT user_id, started_at, trial_expires_at, status
+                    FROM free_trials_old;
+                """,
+            )
+
+def _ensure_subscriptions_schema(conn: sqlite3.Connection) -> None:
+    if not _table_exists(conn, "subscriptions"):
+        conn.execute("""
+            CREATE TABLE subscriptions (
+              tg_user_id  INTEGER PRIMARY KEY,
+              status      TEXT NOT NULL DEFAULT 'NONE',
+              paid_until  TEXT
+            );
+        """)
+    else:
+        cols = _columns(conn, "subscriptions")
+        if "tg_user_id" not in cols and "user_id" in cols:
+            _rebuild_table_user_id_to_tg_user_id(
+                conn,
+                "subscriptions",
+                create_sql="""
+                    CREATE TABLE subscriptions (
+                      tg_user_id  INTEGER PRIMARY KEY,
+                      status      TEXT NOT NULL DEFAULT 'NONE',
+                      paid_until  TEXT
+                    );
+                """,
+                insert_sql="""
+                    INSERT INTO subscriptions (tg_user_id, status, paid_until)
+                    SELECT user_id, status, paid_until
+                    FROM subscriptions_old;
+                """,
+            )
+
+def init_db() -> None:
+    conn = get_conn()
+    try:
+        conn.execute("PRAGMA journal_mode=WAL;")
+        _ensure_users_schema(conn)
+        _ensure_free_trials_schema(conn)
+        _ensure_subscriptions_schema(conn)
+        conn.commit()
+    finally:
+        conn.close()
+
+_DB_READY = False
+def ensure_db():
+    global _DB_READY
+    if not _DB_READY:
+        init_db()
+        _DB_READY = True
+
+def upsert_user_basic(tg_user_id: int, username: str | None):
+    ensure_db()
+    conn = get_conn()
+    sql = """
+        INSERT INTO users (tg_user_id, username, last_seen)
+        VALUES (?, ?, datetime('now'))
+        ON CONFLICT(tg_user_id) DO UPDATE SET
+          username = excluded.username,
+          last_seen = datetime('now'),
+          updated_at = datetime('now')
+    """
+    try:
+        with conn:
+            conn.execute(sql, (tg_user_id, username))
+    finally:
+        conn.close()
+
+def is_paid(tg_user_id: int) -> bool:
+    """True, если подписка ACTIVE и ещё не истёкла."""
+    ensure_db()
+    conn = get_conn()
+    query = """
+        SELECT 1
+        FROM subscriptions
+        WHERE tg_user_id = ?
+          AND UPPER(COALESCE(status,'NONE')) = 'ACTIVE'
+          AND (paid_until IS NULL OR paid_until >= datetime('now'))
+        LIMIT 1
+    """
+    try:
+        row = conn.execute(query, (tg_user_id,)).fetchone()
+        return row is not None
+    except sqlite3.OperationalError as e:
+        if "no such column: tg_user_id" in str(e):
+            conn.close()
+            init_db() 
+            conn = get_conn()
+            row = conn.execute(query, (tg_user_id,)).fetchone()
+            return row is not None
+        raise
+    finally:
+        conn.close()
 
 def _column_exists(conn: sqlite3.Connection, table: str, column: str) -> bool:
     cur = conn.execute(f"PRAGMA table_info({table});")
     return any(row[1] == column for row in cur.fetchall())
 
 def init_subscription_schema():
-    """Добавляет недостающие столбцы в users. Безопасно гонять на старте."""
     with closing(get_conn()) as conn, conn:
         conn.execute("""
         CREATE TABLE IF NOT EXISTS users (
@@ -41,18 +229,7 @@ def init_subscription_schema():
         for sql in alters:
             conn.execute(sql)
 
-def upsert_user_basic(user_id: int, username: Optional[str]):
-    with closing(get_conn()) as conn, conn:
-        conn.execute("""
-        INSERT INTO users(tg_user_id, username, last_seen)
-        VALUES(?, ?, datetime('now'))
-        ON CONFLICT(tg_user_id) DO UPDATE SET
-            username=excluded.username,
-            last_seen=datetime('now')
-        """, (user_id, username))
-
 def safe_set_role(user_id: int, role: Literal["new","old"]):
-    """Сохраняем роль только если ещё не была установлена (не перезатираем)."""
     with closing(get_conn()) as conn, conn:
         conn.execute("""
         INSERT INTO users(tg_user_id, role) VALUES(?, ?)
@@ -64,68 +241,84 @@ def get_role(user_id: int) -> Optional[str]:
         row = conn.execute("SELECT role FROM users WHERE tg_user_id=?", (user_id,)).fetchone()
         return row[0] if row else None
 
-def is_paid(user_id: int) -> bool:
-    with closing(get_conn()) as conn, conn:
-        row = conn.execute("""
-            SELECT COALESCE(is_paid,0),
-                   CASE WHEN subscription_status='PAID' THEN 1 ELSE 0 END
-            FROM users WHERE tg_user_id=?
-        """, (user_id,)).fetchone()
-        if not row: return False
-        return bool(row[0]) or bool(row[1])
-
-def get_trial_info(user_id: int):
-    with closing(get_conn()) as conn, conn:
-        row = conn.execute("""
-            SELECT subscription_status, plan, trial_started_at, trial_expires_at
-            FROM users WHERE tg_user_id=?
-        """, (user_id,)).fetchone()
-        if not row: return None
-        status, plan, ts, te = row
-        return {"status": status, "plan": plan, "trial_started_at": ts, "trial_expires_at": te}
-
-def has_active_trial(user_id: int) -> bool:
-    info = get_trial_info(user_id)
-    if not info: return False
-    if info["status"] != "TRIAL" or not info["trial_expires_at"]:
-        return False
-    try:
-        expires = datetime.fromisoformat(info["trial_expires_at"])
-    except Exception:
-        return False
-    return expires.replace(tzinfo=timezone.utc) > datetime.now(timezone.utc)
 
 def ever_had_trial(user_id: int) -> bool:
     info = get_trial_info(user_id)
     return bool(info and info["trial_started_at"])
+def get_trial_info(tg_user_id: int) -> dict | None:
+    ensure_db()
+    conn = get_conn()
+    try:
+        row = conn.execute("""
+            SELECT
+              ft.started_at,
+              ft.trial_expires_at,
+              ft.status AS trial_status,
+              (
+                SELECT s.status
+                FROM subscriptions s
+                WHERE s.tg_user_id = ft.tg_user_id
+                LIMIT 1
+              ) AS subscription_status
+            FROM free_trials ft
+            WHERE ft.tg_user_id = ?
+            LIMIT 1
+        """, (tg_user_id,)).fetchone()
+        return dict(row) if row else None
+    finally:
+        conn.close()
 
-def start_free_trial(user_id: int, months: int = 2) -> str:
-    """
-    Пытаемся запустить триал.
-    Возвращает: 'PAID_ALREADY' | 'ACTIVE_ALREADY' | 'ALREADY_USED' | 'STARTED'
-    """
-    if is_paid(user_id):
-        return "PAID_ALREADY"
-    if has_active_trial(user_id):
-        return "ACTIVE_ALREADY"
-    if ever_had_trial(user_id):
-        return "ALREADY_USED"
 
-    now = datetime.now(timezone.utc)
-    # точные 60 дней — как в ТЗ
-    expires = now + timedelta(days=60)
-    with closing(get_conn()) as conn, conn:
-        conn.execute("""
-            INSERT INTO users(tg_user_id, subscription_status, plan, trial_started_at, trial_expires_at)
-            VALUES(?, 'TRIAL', 'FREE_TRIAL_2M', ?, ?)
-            ON CONFLICT(tg_user_id) DO UPDATE SET
-                subscription_status='TRIAL',
-                plan='FREE_TRIAL_2M',
-                trial_started_at=?,
-                trial_expires_at=?
-        """, (user_id, now.isoformat(), expires.isoformat(),
-              now.isoformat(), expires.isoformat()))
-    return "STARTED"
+def has_active_trial(tg_user_id: int) -> bool:
+    ensure_db()
+    conn = get_conn()
+    try:
+        row = conn.execute("""
+            SELECT 1
+            FROM free_trials
+            WHERE tg_user_id = ?
+              AND UPPER(COALESCE(status,'NONE')) = 'ACTIVE'
+              AND datetime(trial_expires_at) >= datetime('now')
+            LIMIT 1
+        """, (tg_user_id,)).fetchone()
+        return row is not None
+    finally:
+        conn.close()
+
+
+def start_free_trial(tg_user_id: int, months: int = 2) -> str:
+    ensure_db()
+    conn = get_conn()
+    try:
+        with conn:
+            row = conn.execute("""
+                SELECT status, trial_expires_at
+                FROM free_trials
+                WHERE tg_user_id = ?
+                LIMIT 1
+            """, (tg_user_id,)).fetchone()
+
+            if row:
+                st = (row["status"] or "NONE").upper()
+                not_expired = conn.execute(
+                    "SELECT 1 WHERE datetime(?) >= datetime('now')",
+                    (row["trial_expires_at"],)
+                ).fetchone() is not None
+
+                if st == "ACTIVE" and not_expired:
+                    return "ACTIVE_ALREADY"
+
+                return "ALREADY_USED"
+
+            conn.execute("""
+                INSERT INTO free_trials (tg_user_id, started_at, trial_expires_at, status)
+                VALUES (
+                    ?, datetime('now'), datetime('now', ?), 'ACTIVE'
+                )
+            """, (tg_user_id, f'+{months} months'))
+            return "STARTED"
+    finally:
+        conn.close()
 
 def is_trial_offer_shown(user_id: int) -> bool:
     with closing(get_conn()) as conn, conn:
