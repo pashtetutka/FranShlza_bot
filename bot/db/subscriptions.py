@@ -1,19 +1,10 @@
 from __future__ import annotations
 
+from bot.db.connection import get_conn
 from contextlib import closing
 from typing import Optional, Literal
 
 import sqlite3
-from pathlib import Path
-
-_REPO_ROOT = Path(__file__).resolve().parents[2]
-DB_PATH = _REPO_ROOT / "data" / "app.db"
-
-def get_conn() -> sqlite3.Connection:
-    DB_PATH.parent.mkdir(parents=True, exist_ok=True)
-    conn = sqlite3.connect(DB_PATH, check_same_thread=False)
-    conn.row_factory = sqlite3.Row
-    return conn
 
 def _table_exists(conn: sqlite3.Connection, name: str) -> bool:
     row = conn.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name=? LIMIT 1", (name,)).fetchone()

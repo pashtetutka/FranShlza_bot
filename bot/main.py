@@ -16,7 +16,9 @@ from telegram.ext import (
 
 from bot.config import settings
 from bot.constants import CallbackData
-from bot.api.handlers import common, onboarding, payments, admin, support
+from bot.api.handlers import admin_panel, common, onboarding, payments, admin, support
+from bot.api.handlers.admin_panel import whois, admin_open, admin_callbacks
+
 from bot.api.handlers import trial
 from bot.domain.services import user_service, payment_service, referral_service
 
@@ -36,9 +38,12 @@ def setup_handlers(app):
         CommandHandler("stats", admin.stats_command),
         CommandHandler("list", admin.list_users_command),
         CommandHandler("reply", support.admin_reply),
-    ]:
+        CommandHandler("whois", whois),
+        CommandHandler("admin", admin_open),
+     ]:
         app.add_handler(h)
 
+    app.add_handler(CallbackQueryHandler(admin_callbacks, pattern=r"^adm:"))
     app.add_handler(CallbackQueryHandler(onboarding.intro_done, pattern=_exact(CallbackData.INTRO_DONE), block=True), group=0)
     app.add_handler(CallbackQueryHandler(onboarding.want_join, pattern=_exact(CallbackData.WANT_JOIN), block=True), group=0)
     app.add_handler(CallbackQueryHandler(onboarding.about_project, pattern=_exact(CallbackData.ABOUT), block=True), group=0)
