@@ -1,5 +1,6 @@
 .env
 app.db
+data/
 __pycache__/
 *.pyc
 *.pyo
