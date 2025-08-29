@@ -3,12 +3,14 @@ from bot.keyboards import CHOICE_KB, ROLE_KB, MENU_KB
 
 import os
 import logging
+from telegram.constants import ParseMode
 from telegram import (
     Update,
     KeyboardButton,
     ReplyKeyboardMarkup,
     ReplyKeyboardRemove,
     InlineKeyboardButton,
+    InlineKeyboardMarkup,
     WebAppInfo,
 )
 from telegram.ext import ContextTypes
@@ -33,15 +35,29 @@ async def intro_done(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
     )
 
 async def about_project(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    
     q = update.callback_query
     await q.answer()
 
-    await context.bot.copy_message(
-        chat_id=update.effective_chat.id,
-        from_chat_id=ABOUT_CHAT_ID,
-        message_id=ABOUT_MESSAGE_ID
+    chat_id = q.message.chat_id
+
+    try:
+        await context.bot.copy_message(
+            chat_id=chat_id,
+            from_chat_id=ABOUT_CHAT_ID,
+            message_id=ABOUT_MESSAGE_ID,
+        )
+    except Exception as e:
+        logger.exception("about_project: copy_message failed: %s", e)
+
+    cta_text = (
+        "<b>Готовы присоедениться?</b>\n\n"
+        "Тогда ждем вас в нашем сообществе. Если остались вопросы — «Поддержка»."
     )
+    cta_kb = InlineKeyboardMarkup([
+        [InlineKeyboardButton("🚀 Хочу к вам", callback_data=CallbackData.WANT_JOIN.value)],
+        [InlineKeyboardButton("📞 Поддержка", callback_data="support:start")],
+    ])
+    await context.bot.send_message(chat_id=chat_id, text=cta_text, parse_mode=ParseMode.HTML, reply_markup=cta_kb)
 
 async def want_join(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     

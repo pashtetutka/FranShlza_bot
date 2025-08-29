@@ -86,7 +86,7 @@ def setup_handlers(app):
 
     app.add_handler(MessageHandler(filters.Regex("^(📞 Поддержка|👥 Реферальная ссылка|📊 Статистика)$"), common.menu_handler, block=True), group=1)
 
-    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, support.support_message, block=True), group=3)
+    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, support.support_message, block=True), group=1)
 
     app.add_handler(ConversationHandler(
     entry_points=[CommandHandler("reel_new", reel_new)],
@@ -105,7 +105,7 @@ def setup_handlers(app):
     #app.add_handler(CommandHandler("chatid", chatid))
     #app.add_handler(CommandHandler("whoami", whoami))
     app.add_handler(CommandHandler("reels", reels_list))
-    app.add_handler(CallbackQueryHandler(reels_manage_cb, pattern=r"^reel:(?:activate|deactivate|delete):"))    
+    app.add_handler(CallbackQueryHandler(reels_manage_cb, pattern=r"^reel:(?:activate|deactivate|delete|show):"))
 
     app.job_queue.run_daily(
     callback=_reels_daily_job,

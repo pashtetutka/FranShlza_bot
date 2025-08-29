@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import logging
 from typing import Dict, Any, Optional
+from telegram.error import BadRequest
+
 
 from telegram import Update, InlineKeyboardMarkup, InlineKeyboardButton
 from telegram.ext import ContextTypes, ConversationHandler, CommandHandler, MessageHandler, CallbackQueryHandler, filters
@@ -34,11 +36,13 @@ def _kb_list_item(reel_id: int, active: bool) -> InlineKeyboardMarkup:
     toggle = "🔴 Деактивировать" if active else "🟢 Активировать"
     toggle_code = "deactivate" if active else "activate"
     return InlineKeyboardMarkup([
+        [InlineKeyboardButton("👁️ Предпросмотр", callback_data=f"reel:show:{reel_id}")],
         [
-            InlineKeyboardButton(toggle, callback_data=f"reel:{toggle_code}:{reel_id}"),
+            InlineKeyboardButton(toggle,  callback_data=f"reel:{toggle_code}:{reel_id}"),
             InlineKeyboardButton("🗑️ Удалить", callback_data=f"reel:delete:{reel_id}"),
-        ]
+        ],
     ])
+
 
 
 # ──────────────────────────────────────────────────────────────────────────────
@@ -204,9 +208,12 @@ async def reels_list(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
 
     rows = list_reels(limit=limit)
     if not rows:
-        await update.message.reply_text("Пока нет рилсов.")
+        m = await update.message.reply_text("Пока нет рилсов.")
+        # сохраним сводку на будущее, чтобы потом корректно обновлять
+        context.chat_data["reels_summary"] = {"message_id": m.message_id, "limit": limit}
         return
 
+    # Сводка (запоминаем message_id, чтобы потом обновлять)
     lines = []
     for r in rows:
         rid = r["id"]
@@ -215,26 +222,25 @@ async def reels_list(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
         assets = r["assets"]
         lines.append(f"• <b>{title}</b> (ID {rid}) — {'🟢 активен' if active else '🔴 выключен'}, ассетов: {assets}")
 
-    await update.message.reply_text(
+    summary = await update.message.reply_text(
         "\n".join(lines) + "\n\nДля управления используйте кнопки под отдельными сообщениями.",
         parse_mode=ParseMode.HTML,
     )
+    context.chat_data["reels_summary"] = {"message_id": summary.message_id, "limit": limit}
 
-    # Отдельно отправим карточки с кнопками – чтобы админ мог менять статус/удалять
+    # Карточки по одной
     for r in rows:
         rid = r["id"]
         title = r["title"] or f"Reel #{rid}"
         active = bool(r["is_active"])
+        text = f"ID <code>{rid}</code> — <b>{title}</b>\nСтатус: {'🟢 активен' if active else '🔴 выключен'}"
         await update.message.reply_text(
-            f"ID <code>{rid}</code> — <b>{title}</b>\nСтатус: {'🟢 активен' if active else '🔴 выключен'}",
-            parse_mode=ParseMode.HTML,
-            reply_markup=_kb_list_item(rid, active),
+            text, parse_mode=ParseMode.HTML, reply_markup=_kb_list_item(rid, active)
         )
 
 
 @ADMIN_ONLY
 async def reels_manage_cb(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """Кнопки в карточках списка: активировать/деактивировать/удалить."""
     q = update.callback_query
     data = q.data or ""
     await q.answer()
@@ -245,15 +251,31 @@ async def reels_manage_cb(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
     except Exception:
         return
 
+    chat_id = q.message.chat_id
+
     if action == "activate":
         set_reel_active(reel_id, True)
-        await q.message.edit_text(f"ID <code>{reel_id}</code>: 🟢 активен", parse_mode=ParseMode.HTML)
+        await _render_reel_card(q.message, reel_id)
+        await _refresh_reels_summary(context, chat_id)
+
     elif action == "deactivate":
         set_reel_active(reel_id, False)
-        await q.message.edit_text(f"ID <code>{reel_id}</code>: 🔴 выключен", parse_mode=ParseMode.HTML)
+        await _render_reel_card(q.message, reel_id)
+        await _refresh_reels_summary(context, chat_id)
+
     elif action == "delete":
         delete_reel(reel_id)
-        await q.message.edit_text(f"ID <code>{reel_id}</code>: 🗑️ удалён", parse_mode=ParseMode.HTML)
+        # удалим карточку рилса из чата
+        try:
+            await q.message.delete()
+        except BadRequest:
+            pass
+        await _refresh_reels_summary(context, chat_id)
+
+    elif action == "show":
+        await _send_reel_preview(context.bot, chat_id, reel_id)
+        # карточку и сводку не меняем
+
 
 
 from bot.domain.services.reel_delivery_service import deliver_reels_daily
@@ -263,3 +285,91 @@ async def reels_send_now(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
     await update.message.reply_text("🚀 Запускаю разовую отправку…")
     await deliver_reels_daily(context.application.bot)
     await update.message.reply_text("✅ Готово.")
+
+
+from telegram.constants import ParseMode
+
+async def _send_reel_preview(bot, chat_id: int, reel_id: int) -> bool:
+    data = get_reel(reel_id)
+    if not data:
+        await bot.send_message(chat_id, f"⚠️ Рилс ID {reel_id} не найден.")
+        return False
+
+    assets = data.get("assets", {})
+    preview = assets.get("preview")
+    video   = assets.get("video")
+    caption = assets.get("caption")
+
+    sent_any = False
+
+    if preview and preview.get("tg_file_id"):
+        await bot.send_photo(chat_id=chat_id, photo=preview["tg_file_id"], disable_notification=True)
+        sent_any = True
+
+    if video and video.get("tg_file_id"):
+        await bot.send_video(chat_id=chat_id, video=video["tg_file_id"], disable_notification=True)
+        sent_any = True
+
+    if caption and caption.get("text"):
+        await bot.send_message(
+            chat_id=chat_id,
+            text=caption["text"],
+            parse_mode=ParseMode.HTML,
+            disable_web_page_preview=True,
+            disable_notification=True,
+        )
+        sent_any = True
+
+    if not sent_any:
+        await bot.send_message(chat_id, f"⚠️ У рилса ID {reel_id} нет сохранённых ассетов.")
+    return sent_any
+
+
+async def _render_reel_card(message, reel_id: int) -> None:
+    details = get_reel(reel_id)
+    if not details or not details.get("reel"):
+        return
+    r = details["reel"]
+    title = r.get("title") or f"Reel #{reel_id}"
+    active = bool(r.get("is_active"))
+    text = (
+        f"ID <code>{reel_id}</code> — <b>{title}</b>\n"
+        f"Статус: {'🟢 активен' if active else '🔴 выключен'}"
+    )
+    kb = _kb_list_item(reel_id, active)
+    try:
+        await message.edit_text(text, parse_mode=ParseMode.HTML, reply_markup=kb)
+    except BadRequest as e:
+        pass
+
+
+async def _refresh_reels_summary(context: ContextTypes.DEFAULT_TYPE, chat_id: int) -> None:
+    meta = context.chat_data.get("reels_summary")  # {'message_id': int, 'limit': int}
+    if not meta:
+        return
+    msg_id = meta.get("message_id")
+    limit = meta.get("limit", 10)
+
+    rows = list_reels(limit=limit)
+    if not rows:
+        text = "Пока нет рилсов."
+    else:
+        lines = []
+        for r in rows:
+            rid = r["id"]
+            title = r["title"] or f"Reel #{rid}"
+            active = bool(r["is_active"])
+            assets = r["assets"]
+            lines.append(f"• <b>{title}</b> (ID {rid}) — {'🟢 активен' if active else '🔴 выключен'}, ассетов: {assets}")
+        text = "\n".join(lines) + "\n\nДля управления используйте кнопки под отдельными сообщениями."
+
+    try:
+        await context.bot.edit_message_text(
+            chat_id=chat_id,
+            message_id=msg_id,
+            text=text,
+            parse_mode=ParseMode.HTML,
+        )
+    except BadRequest:
+        m = await context.bot.send_message(chat_id=chat_id, text=text, parse_mode=ParseMode.HTML)
+        context.chat_data["reels_summary"] = {"message_id": m.message_id, "limit": limit}
